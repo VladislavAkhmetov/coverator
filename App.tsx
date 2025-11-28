@@ -1,11 +1,8 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Controls } from './components/Controls';
 import { GeneratorSettings, Preset } from './types';
 import { DEFAULT_SETTINGS, PRESETS } from './constants';
 import { processImage } from './utils/canvasUtils';
-import { TYPEWRITER_PHRASES } from './constants/typewriterPhrases';
-import * as bodyPix from '@tensorflow-models/body-pix';
-import '@tensorflow/tfjs';
 
 // Default Placeholder Image (Abstract Tech)
 const PLACEHOLDER_IMG_URL = "https://picsum.photos/1920/1080?grayscale&blur=2"; 
@@ -14,38 +11,19 @@ export default function App() {
   const [settings, setSettings] = useState<GeneratorSettings>(DEFAULT_SETTINGS);
   const [imageSrc, setImageSrc] = useState<string>(PLACEHOLDER_IMG_URL);
   const [patternSrc, setPatternSrc] = useState<string | null>(null);
-  const [isProcessing, setIsProcessing] = useState(false);
   const [showCamera, setShowCamera] = useState(false);
-  const [isExportingAnimation, setIsExportingAnimation] = useState(false);
-  
-  // Animation state
-  const animationFrameRef = useRef<number>(0);
-  const animationTimeRef = useRef<number>(0);
-  
-  // Typewriter state
-  const [typewriterText, setTypewriterText] = useState<string>('');
-  const [typewriterCharIndex, setTypewriterCharIndex] = useState<number>(0);
-  const [currentPhraseIndex, setCurrentPhraseIndex] = useState<number>(0);
-  const typewriterTimerRef = useRef<NodeJS.Timeout | null>(null);
   
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imgRef = useRef<HTMLImageElement>(new Image());
   const patternImgRef = useRef<HTMLImageElement | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
-  const previewStreamRef = useRef<MediaStream | null>(null); // For camera preview overlay
-  const previewVideoRef = useRef<HTMLVideoElement>(null);
-  const segmentationCanvasRef = useRef<HTMLCanvasElement | null>(null); // For background removal
-  const bodyPixModelRef = useRef<bodyPix.BodyPix | null>(null);
-  const cameraAnimationFrameRef = useRef<number>(0);
 
   // Load initial image
   useEffect(() => {
     imgRef.current.crossOrigin = "Anonymous";
     imgRef.current.src = imageSrc;
-    imgRef.current.onload = () => {
-      renderCanvas(0, !settings.cameraPreviewEnabled).catch(console.error);
-    };
+    imgRef.current.onload = () => renderCanvas();
   }, [imageSrc]);
 
   // Load pattern image (second source)
@@ -56,188 +34,15 @@ export default function App() {
     }
     patternImgRef.current.crossOrigin = "Anonymous";
     patternImgRef.current.src = patternSrc;
-    patternImgRef.current.onload = () => {
-      renderCanvas(0, !settings.cameraPreviewEnabled).catch(console.error);
-    };
+    patternImgRef.current.onload = () => renderCanvas();
   }, [patternSrc]);
 
-  // Initialize BodyPix model
+  // Re-render when settings change
   useEffect(() => {
-    const initBodyPix = async () => {
-      try {
-        const model = await bodyPix.load({
-          architecture: 'MobileNetV1',
-          outputStride: 16,
-          multiplier: 0.75,
-          quantBytes: 2
-        });
-        bodyPixModelRef.current = model;
-      } catch (error) {
-        console.error('Ошибка загрузки BodyPix:', error);
-      }
-    };
-    initBodyPix();
-  }, []);
+    requestAnimationFrame(renderCanvas);
+  }, [settings]);
 
-  // Animation loop (только для анимации фона)
-  useEffect(() => {
-    if (!settings.animationEnabled) {
-      animationTimeRef.current = 0;
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current);
-        animationFrameRef.current = 0;
-      }
-      // Рендерим без анимации, но только если камера не включена (иначе камера сама рендерит)
-      if (!settings.cameraPreviewEnabled) {
-        renderCanvas(0, false).catch(console.error); // false = не рендерить камеру в этом цикле
-      }
-      return;
-    }
-
-    let lastTime = 0;
-    const animate = (timestamp: number) => {
-      if (lastTime === 0) {
-        lastTime = timestamp;
-      }
-      const deltaTime = timestamp - lastTime;
-      lastTime = timestamp;
-      
-      renderCanvas(timestamp, false).catch(console.error); // false = не рендерить камеру в цикле анимации
-      animationFrameRef.current = requestAnimationFrame(animate);
-    };
-
-    animationFrameRef.current = requestAnimationFrame(animate);
-    
-    return () => {
-      if (animationFrameRef.current) {
-        cancelAnimationFrame(animationFrameRef.current);
-      }
-    };
-  }, [settings.animationEnabled, settings]);
-
-  // Отдельный цикл для камеры (независимо от анимации)
-  useEffect(() => {
-    if (!settings.cameraPreviewEnabled || !previewVideoRef.current || previewVideoRef.current.readyState < 2) {
-      if (cameraAnimationFrameRef.current) {
-        cancelAnimationFrame(cameraAnimationFrameRef.current);
-        cameraAnimationFrameRef.current = 0;
-      }
-      return;
-    }
-
-    const animateCamera = () => {
-      renderCanvas(animationTimeRef.current || 0, true).catch(console.error); // true = рендерить камеру
-      cameraAnimationFrameRef.current = requestAnimationFrame(animateCamera);
-    };
-
-    cameraAnimationFrameRef.current = requestAnimationFrame(animateCamera);
-
-    return () => {
-      if (cameraAnimationFrameRef.current) {
-        cancelAnimationFrame(cameraAnimationFrameRef.current);
-      }
-    };
-  }, [settings.cameraPreviewEnabled, settings]);
-
-  // Typewriter effect - зацикленный: набор → стирание → снова набор
-  const [isTyping, setIsTyping] = useState(true); // true = typing, false = erasing
-  
-  useEffect(() => {
-    if (!settings.typewriterEnabled) {
-      setTypewriterText('');
-      setTypewriterCharIndex(0);
-      setIsTyping(true);
-      if (typewriterTimerRef.current) {
-        clearTimeout(typewriterTimerRef.current);
-        typewriterTimerRef.current = null;
-      }
-      return;
-    }
-
-    const currentPhrase = TYPEWRITER_PHRASES[currentPhraseIndex] || '';
-    const speed = Math.max(30, 400 - (settings.typewriterSpeed * 3.7)); // 30-400ms per char
-    const eraseSpeed = speed * 0.5; // Стирание быстрее в 2 раза
-
-    if (isTyping) {
-      // Набираем текст
-      if (typewriterCharIndex < currentPhrase.length) {
-        typewriterTimerRef.current = setTimeout(() => {
-          setTypewriterText(currentPhrase.substring(0, typewriterCharIndex + 1));
-          setTypewriterCharIndex(typewriterCharIndex + 1);
-        }, speed);
-      } else {
-        // Фраза набрана, ждём и начинаем стирать
-        typewriterTimerRef.current = setTimeout(() => {
-          setIsTyping(false);
-        }, 1500); // Пауза после набора
-      }
-    } else {
-      // Стираем текст
-      if (typewriterCharIndex > 0) {
-        typewriterTimerRef.current = setTimeout(() => {
-          setTypewriterText(currentPhrase.substring(0, typewriterCharIndex - 1));
-          setTypewriterCharIndex(typewriterCharIndex - 1);
-        }, eraseSpeed);
-      } else {
-        // Текст стёрт, переходим к следующей фразе и начинаем набирать
-        setCurrentPhraseIndex((prev) => (prev + 1) % TYPEWRITER_PHRASES.length);
-        setIsTyping(true);
-        typewriterTimerRef.current = setTimeout(() => {
-          // Небольшая пауза перед новой фразой
-        }, 300);
-      }
-    }
-
-    return () => {
-      if (typewriterTimerRef.current) {
-        clearTimeout(typewriterTimerRef.current);
-      }
-    };
-  }, [settings.typewriterEnabled, typewriterCharIndex, currentPhraseIndex, settings.typewriterSpeed, isTyping]);
-
-  // Camera preview overlay
-  useEffect(() => {
-    if (!settings.cameraPreviewEnabled) {
-      if (previewStreamRef.current) {
-        previewStreamRef.current.getTracks().forEach(track => track.stop());
-        previewStreamRef.current = null;
-      }
-      return;
-    }
-
-    const initPreviewCamera = async () => {
-      try {
-        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-          alert('Камера не поддерживается для предпросмотра');
-          setSettings(prev => ({ ...prev, cameraPreviewEnabled: false }));
-          return;
-        }
-
-        const stream = await navigator.mediaDevices.getUserMedia({ 
-          video: { facingMode: 'user' } // Front camera for preview
-        });
-        
-        previewStreamRef.current = stream;
-        if (previewVideoRef.current) {
-          previewVideoRef.current.srcObject = stream;
-          previewVideoRef.current.play();
-        }
-      } catch (error) {
-        console.error('Ошибка доступа к камере для предпросмотра:', error);
-        setSettings(prev => ({ ...prev, cameraPreviewEnabled: false }));
-      }
-    };
-
-    initPreviewCamera();
-
-    return () => {
-      if (previewStreamRef.current) {
-        previewStreamRef.current.getTracks().forEach(track => track.stop());
-      }
-    };
-  }, [settings.cameraPreviewEnabled]);
-
-  const renderCanvas = async (deltaTime: number = 0, renderCamera: boolean = true) => {
+  const renderCanvas = () => {
     const canvas = canvasRef.current;
     const img = imgRef.current;
     const patternImg = patternImgRef.current;
@@ -253,82 +58,7 @@ export default function App() {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    // Calculate animation offset if enabled
-    const animOffset = settings.animationEnabled ? {
-      rotation: (deltaTime / 100) * (settings.animationSpeed / 10), // degrees per second
-      zoom: 1 + Math.sin(deltaTime / 1000) * (settings.animationIntensity / 200),
-      shiftX: Math.sin(deltaTime / 2000) * (settings.animationIntensity / 2),
-      shiftY: Math.cos(deltaTime / 2000) * (settings.animationIntensity / 2)
-    } : null;
-
-    // Сначала рисуем сгенерированный фон
-    processImage(ctx, img, patternImg ?? null, settings, canvas.width, canvas.height, animOffset, typewriterText);
-
-    // Затем рисуем человека с вырезанным фоном поверх (только если renderCamera = true)
-    if (renderCamera && settings.cameraPreviewEnabled && previewVideoRef.current && previewVideoRef.current.readyState >= 2) {
-      const video = previewVideoRef.current;
-      
-      if (bodyPixModelRef.current) {
-        // Используем BodyPix для вырезания фона
-        try {
-          const segmentation = await bodyPixModelRef.current.segmentPerson(video, {
-            flipHorizontal: false,
-            internalResolution: 'medium',
-            segmentationThreshold: 0.7
-          });
-          
-          // Создаём временный canvas для маски
-          const maskCanvas = document.createElement('canvas');
-          maskCanvas.width = video.videoWidth;
-          maskCanvas.height = video.videoHeight;
-          const maskCtx = maskCanvas.getContext('2d');
-          
-          if (maskCtx) {
-            // Рисуем маску
-            const mask = bodyPix.toMask(segmentation);
-            maskCtx.putImageData(mask, 0, 0);
-            
-            // Создаём canvas с видео
-            const videoCanvas = document.createElement('canvas');
-            videoCanvas.width = video.videoWidth;
-            videoCanvas.height = video.videoHeight;
-            const videoCtx = videoCanvas.getContext('2d');
-            
-            if (videoCtx) {
-              videoCtx.drawImage(video, 0, 0);
-              
-              // Применяем маску
-              videoCtx.globalCompositeOperation = 'destination-in';
-              videoCtx.drawImage(maskCanvas, 0, 0);
-              
-              // Масштабируем под размер основного canvas
-              const videoAspect = video.videoWidth / video.videoHeight;
-              const canvasAspect = canvas.width / canvas.height;
-              
-              let drawWidth = canvas.width;
-              let drawHeight = canvas.height;
-              let drawX = 0;
-              let drawY = 0;
-              
-              if (videoAspect > canvasAspect) {
-                drawHeight = canvas.height;
-                drawWidth = drawHeight * videoAspect;
-                drawX = (canvas.width - drawWidth) / 2;
-              } else {
-                drawWidth = canvas.width;
-                drawHeight = drawWidth / videoAspect;
-                drawY = (canvas.height - drawHeight) / 2;
-              }
-              
-              // Рисуем человека поверх фона
-              ctx.drawImage(videoCanvas, drawX, drawY, drawWidth, drawHeight);
-            }
-          }
-        } catch (error) {
-          console.error('Ошибка сегментации BodyPix:', error);
-        }
-      }
-    }
+    processImage(ctx, img, patternImg ?? null, settings, canvas.width, canvas.height);
   };
 
   const handleUploadBase = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -366,78 +96,6 @@ export default function App() {
     link.click();
   };
 
-  const handleExportAnimation = async () => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    
-    setIsExportingAnimation(true);
-    
-    try {
-      // Экспорт только фона (без камеры)
-      const duration = 12000; // 12 секунд
-      const fps = 30;
-      const frameCount = Math.floor(duration / 1000 * fps); // 360 кадров
-      
-      // Используем MediaRecorder для записи canvas stream
-      const stream = canvas.captureStream(fps);
-      const mediaRecorder = new MediaRecorder(stream, {
-        mimeType: 'video/webm;codecs=vp9',
-        videoBitsPerSecond: 2500000 // 2.5 Mbps для качества
-      });
-      
-      const chunks: Blob[] = [];
-      mediaRecorder.ondataavailable = (e) => {
-        if (e.data.size > 0) chunks.push(e.data);
-      };
-      
-      // Запускаем анимацию для записи (без камеры)
-      let frameTime = 0;
-      const frameInterval = 1000 / fps; // ~33ms на кадр
-      
-      const recordFrame = async () => {
-        if (frameTime < duration) {
-          await renderCanvas(frameTime, false); // false = не рендерить камеру
-          frameTime += frameInterval;
-          setTimeout(recordFrame, frameInterval);
-        }
-      };
-      
-      return new Promise<void>((resolve, reject) => {
-        mediaRecorder.onstop = () => {
-          const blob = new Blob(chunks, { type: 'video/webm' });
-          const url = URL.createObjectURL(blob);
-          const link = document.createElement('a');
-          link.download = `tsekh_vlab_animation_${Date.now()}.webm`;
-          link.href = url;
-          link.click();
-          URL.revokeObjectURL(url);
-          setIsExportingAnimation(false);
-          resolve();
-        };
-        
-        mediaRecorder.onerror = (e) => {
-          setIsExportingAnimation(false);
-          reject(e);
-        };
-        
-        // Начинаем запись
-        mediaRecorder.start();
-        
-        // Запускаем рендеринг кадров
-        recordFrame();
-        
-        // Останавливаем через duration
-        setTimeout(() => {
-          mediaRecorder.stop();
-        }, duration);
-      });
-    } catch (error) {
-      console.error('Ошибка экспорта анимации:', error);
-      alert('Не удалось экспортировать анимацию. Убедитесь, что анимация включена.');
-      setIsExportingAnimation(false);
-    }
-  };
-
   const handleRandomize = () => {
       // Pick a random preset or randomize values nicely
       const randomPreset = PRESETS[Math.floor(Math.random() * PRESETS.length)];
@@ -463,7 +121,6 @@ export default function App() {
       }
 
       // Запрашиваем доступ к камере
-      // Сначала пробуем заднюю камеру (для телефонов), если не получится - любую доступную
       let stream: MediaStream;
       try {
         stream = await navigator.mediaDevices.getUserMedia({ 
@@ -553,8 +210,6 @@ export default function App() {
             onUploadBase={handleUploadBase}
             onUploadPattern={handleUploadPattern}
             onDownload={handleDownload}
-            onExportAnimation={handleExportAnimation}
-            isExportingAnimation={isExportingAnimation}
             presets={PRESETS}
             onApplyPreset={(p) => setSettings(p.settings)}
             onRandomize={handleRandomize}
@@ -593,16 +248,6 @@ export default function App() {
             <div className="text-gray-600 font-mono text-[10px]">1920x1080 OUTPUT</div>
         </div>
       </div>
-
-      {/* Hidden video for camera preview overlay */}
-      <video
-        ref={previewVideoRef}
-        autoPlay
-        playsInline
-        muted
-        className="hidden"
-        style={{ display: 'none' }}
-      />
 
       {/* Camera Modal */}
       {showCamera && (

@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { GeneratorSettings, Preset } from '../types';
-import { Sliders, Maximize, Palette, Layers, Grid, Cpu, Download, RefreshCw, Upload, Zap, Aperture, Move, Camera, Video, Type, Play } from 'lucide-react';
+import { Sliders, Maximize, Palette, Layers, Grid, Cpu, Download, RefreshCw, Upload, Zap, Aperture, Move, Camera } from 'lucide-react';
 
 interface ControlsProps {
     settings: GeneratorSettings;
@@ -9,8 +9,6 @@ interface ControlsProps {
     onUploadBase: (e: React.ChangeEvent<HTMLInputElement>) => void;
     onUploadPattern: (e: React.ChangeEvent<HTMLInputElement>) => void;
     onDownload: () => void;
-    onExportAnimation?: () => void;
-    isExportingAnimation?: boolean;
     presets: Preset[];
     onApplyPreset: (p: Preset) => void;
     onRandomize: () => void;
@@ -78,9 +76,7 @@ export const Controls: React.FC<ControlsProps> = ({
     onUpdate, 
     onUploadBase, 
     onUploadPattern,
-    onDownload,
-    onExportAnimation,
-    isExportingAnimation = false,
+    onDownload, 
     presets, 
     onApplyPreset,
     onRandomize,
@@ -249,106 +245,14 @@ export const Controls: React.FC<ControlsProps> = ({
                  <Slider label="Logo Scale" value={settings.logoScale} min={0.2} max={3.0} step={0.1} onChange={(v: number) => update('logoScale', v)} />
             </Section>
 
-            <Section title="Camera Preview" icon={Video}>
-                <div className="flex items-center justify-between mb-4">
-                    <span className="text-[10px] font-mono uppercase text-gray-400">Live Preview</span>
-                    <button
-                        onClick={() => update('cameraPreviewEnabled', !settings.cameraPreviewEnabled)}
-                        className={`px-4 py-2 text-[10px] font-mono border transition-all ${
-                            settings.cameraPreviewEnabled 
-                                ? 'border-[#3253EE] bg-[#3253EE] text-white shadow-[0_0_10px_rgba(50,83,238,0.5)]' 
-                                : 'border-gray-800 bg-[#0F0F0F] text-gray-500 hover:border-gray-600 hover:text-white'
-                        }`}
-                    >
-                        {settings.cameraPreviewEnabled ? 'ON' : 'OFF'}
-                    </button>
-                </div>
-                <p className="text-[9px] text-gray-600 font-mono leading-relaxed">
-                    Показывает камеру поверх фона для предпросмотра в реальном времени
-                </p>
-            </Section>
-
-            <Section title="Animation" icon={Play}>
-                <div className="flex items-center justify-between mb-4">
-                    <span className="text-[10px] font-mono uppercase text-gray-400">Enable Animation</span>
-                    <button
-                        onClick={() => update('animationEnabled', !settings.animationEnabled)}
-                        className={`px-4 py-2 text-[10px] font-mono border transition-all ${
-                            settings.animationEnabled 
-                                ? 'border-[#B4FF00] bg-[#B4FF00] text-black shadow-[0_0_10px_rgba(180,255,0,0.5)]' 
-                                : 'border-gray-800 bg-[#0F0F0F] text-gray-500 hover:border-gray-600 hover:text-white'
-                        }`}
-                    >
-                        {settings.animationEnabled ? 'ON' : 'OFF'}
-                    </button>
-                </div>
-                {settings.animationEnabled && (
-                    <>
-                        <Slider 
-                            label="Animation Speed" 
-                            value={settings.animationSpeed} 
-                            min={0} 
-                            max={100} 
-                            unit="%" 
-                            onChange={(v: number) => update('animationSpeed', v)} 
-                        />
-                        <Slider 
-                            label="Animation Intensity" 
-                            value={settings.animationIntensity} 
-                            min={0} 
-                            max={100} 
-                            unit="%" 
-                            onChange={(v: number) => update('animationIntensity', v)} 
-                        />
-                    </>
-                )}
-            </Section>
-
-            <Section title="Typewriter Effect" icon={Type}>
-                <div className="flex items-center justify-between mb-4">
-                    <span className="text-[10px] font-mono uppercase text-gray-400">Enable Typewriter</span>
-                    <button
-                        onClick={() => update('typewriterEnabled', !settings.typewriterEnabled)}
-                        className={`px-4 py-2 text-[10px] font-mono border transition-all ${
-                            settings.typewriterEnabled 
-                                ? 'border-[#B4FF00] bg-[#B4FF00] text-black shadow-[0_0_10px_rgba(180,255,0,0.5)]' 
-                                : 'border-gray-800 bg-[#0F0F0F] text-gray-500 hover:border-gray-600 hover:text-white'
-                        }`}
-                    >
-                        {settings.typewriterEnabled ? 'ON' : 'OFF'}
-                    </button>
-                </div>
-                {settings.typewriterEnabled && (
-                    <Slider 
-                        label="Typing Speed" 
-                        value={settings.typewriterSpeed} 
-                        min={0} 
-                        max={100} 
-                        unit="%" 
-                        onChange={(v: number) => update('typewriterSpeed', v)} 
-                    />
-                )}
-            </Section>
-
-            <div className="grid grid-cols-2 gap-3 mt-4">
-                <button 
-                    onClick={onDownload}
-                    className="bg-[#3253EE] hover:bg-[#203bc4] text-white font-bold py-4 px-4 flex items-center justify-center gap-2 transition-all font-display uppercase tracking-widest border border-white/10 hover:border-white/30 hover:shadow-[0_0_20px_rgba(50,83,238,0.5)] group relative overflow-hidden"
-                >
-                    <Download size={18} className="group-hover:animate-bounce z-10" />
-                    <span className="z-10 text-xs">PNG</span>
-                </button>
-                {settings.animationEnabled && onExportAnimation && (
-                    <button 
-                        onClick={onExportAnimation}
-                        disabled={isExportingAnimation}
-                        className="bg-[#B4FF00] hover:bg-[#9de600] text-black font-bold py-4 px-4 flex items-center justify-center gap-2 transition-all font-display uppercase tracking-widest border border-black/20 hover:border-black/40 hover:shadow-[0_0_20px_rgba(180,255,0,0.5)] group relative overflow-hidden disabled:opacity-50 disabled:cursor-not-allowed"
-                    >
-                        <Video size={18} className="group-hover:animate-pulse z-10" />
-                        <span className="z-10 text-xs">{isExportingAnimation ? 'EXPORTING...' : 'WEBM'}</span>
-                    </button>
-                )}
-            </div>
+            <button 
+                onClick={onDownload}
+                className="w-full bg-[#3253EE] hover:bg-[#203bc4] text-white font-bold py-5 px-6 flex items-center justify-center gap-3 transition-all mt-4 font-display uppercase tracking-widest border border-white/10 hover:border-white/30 hover:shadow-[0_0_30px_rgba(50,83,238,0.5)] group relative overflow-hidden"
+            >
+                <div className="absolute inset-0 bg-[linear-gradient(45deg,transparent_25%,rgba(255,255,255,0.1)_50%,transparent_75%)] bg-[length:250%_250%] animate-[shimmer_3s_linear_infinite]"></div>
+                <Download size={20} className="group-hover:animate-bounce z-10" />
+                <span className="z-10">GENERATE .PNG</span>
+            </button>
             
              <div className="mt-12 text-center opacity-40">
                 <div className="flex justify-center gap-1 mb-2">

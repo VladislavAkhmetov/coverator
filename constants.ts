@@ -20,13 +20,7 @@ export const DEFAULT_SETTINGS: GeneratorSettings = {
     shiftX: 0,
     shiftY: 0,
     logoOverlay: 'mask-negative',
-    logoScale: 0.8,
-    animationEnabled: false,
-    animationSpeed: 50,
-    animationIntensity: 30,
-    typewriterEnabled: false,
-    typewriterSpeed: 50,
-    cameraPreviewEnabled: false
+    logoScale: 0.8
 };
 
 export const PRESETS: Preset[] = [

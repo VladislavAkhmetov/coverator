@@ -43,9 +43,7 @@ export const processImage = (
     patternImg: HTMLImageElement | null,
     settings: GeneratorSettings,
     width: number,
-    height: number,
-    animOffset?: { rotation: number; zoom: number; shiftX: number; shiftY: number } | null,
-    typewriterText?: string
+    height: number
 ) => {
     // 1. Offscreen canvas for base processing
     const tempCanvas = document.createElement('canvas');
@@ -54,25 +52,19 @@ export const processImage = (
     const tCtx = tempCanvas.getContext('2d')!;
 
     // 2. Draw original with Zoom, Rotation AND Shift (BASE IMAGE)
-    // Apply animation offset if provided
-    const currentZoom = animOffset ? settings.zoom * animOffset.zoom : settings.zoom;
-    const currentRotation = animOffset ? settings.rotation + animOffset.rotation : settings.rotation;
-    const currentShiftX = animOffset ? settings.shiftX + animOffset.shiftX : settings.shiftX;
-    const currentShiftY = animOffset ? settings.shiftY + animOffset.shiftY : settings.shiftY;
-    
-    const scale = Math.max(width / baseImg.width, height / baseImg.height) * currentZoom;
+    const scale = Math.max(width / baseImg.width, height / baseImg.height) * settings.zoom;
     
     // Calculate centered position
     const baseX = (width / 2) - (baseImg.width / 2) * scale;
     const baseY = (height / 2) - (baseImg.height / 2) * scale;
     
     // Apply Shift (as percentage of canvas size)
-    const offsetX = (currentShiftX / 100) * width;
-    const offsetY = (currentShiftY / 100) * height;
+    const offsetX = (settings.shiftX / 100) * width;
+    const offsetY = (settings.shiftY / 100) * height;
 
     tCtx.save();
     tCtx.translate(width/2 + offsetX, height/2 + offsetY);
-    tCtx.rotate((currentRotation * Math.PI) / 180);
+    tCtx.rotate((settings.rotation * Math.PI) / 180);
     tCtx.translate(-(width/2 + offsetX), -(height/2 + offsetY)); // Rotate around shift point
     
     tCtx.drawImage(baseImg, baseX + offsetX, baseY + offsetY, baseImg.width * scale, baseImg.height * scale);
@@ -390,35 +382,4 @@ export const processImage = (
         ctx.restore();
     }
 
-    // 8. Typewriter text overlay
-    if (typewriterText && typewriterText.length > 0) {
-        ctx.save();
-        ctx.font = `bold ${Math.min(width, height) * 0.08}px 'JetBrains Mono', monospace`;
-        ctx.fillStyle = '#B4FF00';
-        ctx.strokeStyle = '#3253EE';
-        ctx.lineWidth = Math.max(2, width * 0.002);
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        
-        // Glow effect
-        ctx.shadowColor = '#B4FF00';
-        ctx.shadowBlur = 20;
-        
-        const x = width / 2;
-        const y = height * 0.15; // Top area
-        
-        // Draw text with stroke for visibility
-        ctx.strokeText(typewriterText, x, y);
-        ctx.fillText(typewriterText, x, y);
-        
-        // Cursor blink effect
-        const cursorVisible = Math.floor(Date.now() / 500) % 2 === 0;
-        if (cursorVisible) {
-            const textWidth = ctx.measureText(typewriterText).width;
-            ctx.fillStyle = '#B4FF00';
-            ctx.fillRect(x + textWidth / 2 + 5, y - 15, 3, 30);
-        }
-        
-        ctx.restore();
-    }
 };
