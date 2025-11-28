@@ -14,6 +14,10 @@ export interface GeneratorSettings {
     colorMix: number; // 0-100 (Blend between original and brand colors)
     limeAccent: number; // 0-100 (Intensity of the lime green glitch)
     
+    // Dual-source (base + pattern) mixing
+    patternTextureMix: number; // 0-100 how much second image texture/colors are blended in
+    patternDetailMix: number;  // 0-100 how much second image drives local contrast/structure
+    
     // Geometry / Carpet
     kaleidoscopeSegments: 0 | 2 | 4 | 8; // Symmetry count
     mirrorMode: boolean;

@@ -6,7 +6,8 @@ import { Sliders, Maximize, Palette, Layers, Grid, Cpu, Download, RefreshCw, Upl
 interface ControlsProps {
     settings: GeneratorSettings;
     onUpdate: (newSettings: GeneratorSettings) => void;
-    onUpload: (e: React.ChangeEvent<HTMLInputElement>) => void;
+    onUploadBase: (e: React.ChangeEvent<HTMLInputElement>) => void;
+    onUploadPattern: (e: React.ChangeEvent<HTMLInputElement>) => void;
     onDownload: () => void;
     presets: Preset[];
     onApplyPreset: (p: Preset) => void;
@@ -72,7 +73,8 @@ const Section = ({ title, icon: Icon, children }: any) => (
 export const Controls: React.FC<ControlsProps> = ({ 
     settings, 
     onUpdate, 
-    onUpload, 
+    onUploadBase, 
+    onUploadPattern,
     onDownload, 
     presets, 
     onApplyPreset,
@@ -104,7 +106,7 @@ export const Controls: React.FC<ControlsProps> = ({
                     <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-[#3253EE]/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
                     <Upload size={24} className="text-gray-500 group-hover:text-[#3253EE] transition-colors mb-1" />
                     <span className="text-[10px] font-bold font-mono tracking-wider z-10 text-center">UPLOAD SOURCE</span>
-                    <input type="file" onChange={onUpload} accept="image/*" className="hidden" />
+                    <input type="file" onChange={onUploadBase} accept="image/*" className="hidden" />
                 </label>
                 <button 
                     onClick={onTakePhoto}
@@ -123,6 +125,39 @@ export const Controls: React.FC<ControlsProps> = ({
                     <span className="text-[10px] font-bold font-mono tracking-wider z-10">RANDOMIZE</span>
                 </button>
             </div>
+
+            <Section title="Pattern Source (2nd image)" icon={Layers}>
+                <div className="grid grid-cols-2 gap-3 mb-4">
+                    <label className="flex flex-col items-center justify-center gap-2 bg-[#0F0F0F] hover:bg-[#151515] border border-gray-800 text-white py-4 px-4 cursor-pointer transition-all hover:border-[#3253EE] hover:shadow-[0_0_20px_rgba(50,83,238,0.1)] group relative overflow-hidden">
+                        <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-[#3253EE]/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
+                        <Layers size={18} className="text-gray-500 group-hover:text-[#3253EE] transition-colors mb-1" />
+                        <span className="text-[9px] font-bold font-mono tracking-wider z-10 text-center">
+                            UPLOAD PATTERN<br />/ STRUCTURE
+                        </span>
+                        <input type="file" onChange={onUploadPattern} accept="image/*" className="hidden" />
+                    </label>
+                    <div className="text-[10px] text-gray-500 font-mono leading-relaxed px-1 flex items-center">
+                        Загрузите, например, советский ковер. Затем смешайте его с основным источником с помощью ползунков ниже.
+                    </div>
+                </div>
+
+                <Slider 
+                    label="Pattern Texture Mix" 
+                    value={settings.patternTextureMix} 
+                    min={0} 
+                    max={100} 
+                    unit="%" 
+                    onChange={(v: number) => update('patternTextureMix', v)} 
+                />
+                <Slider 
+                    label="Pattern Structure Influence" 
+                    value={settings.patternDetailMix} 
+                    min={0} 
+                    max={100} 
+                    unit="%" 
+                    onChange={(v: number) => update('patternDetailMix', v)} 
+                />
+            </Section>
 
             <div className="mb-8">
                 <div className="text-[10px] font-mono uppercase text-gray-500 mb-2 tracking-widest flex items-center gap-2">

@@ -39,7 +39,8 @@ export const drawTsekhLogo = (ctx: CanvasRenderingContext2D, width: number, heig
 
 export const processImage = (
     ctx: CanvasRenderingContext2D, 
-    img: HTMLImageElement, 
+    baseImg: HTMLImageElement, 
+    patternImg: HTMLImageElement | null,
     settings: GeneratorSettings,
     width: number,
     height: number
@@ -50,8 +51,8 @@ export const processImage = (
     tempCanvas.height = height;
     const tCtx = tempCanvas.getContext('2d')!;
 
-    // 2. Draw original with Zoom, Rotation AND Shift
-    const scale = Math.max(width / img.width, height / img.height) * settings.zoom;
+    // 2. Draw original with Zoom, Rotation AND Shift (BASE IMAGE)
+    const scale = Math.max(width / baseImg.width, height / baseImg.height) * settings.zoom;
     
     // Calculate centered position
     const baseX = (width / 2) - (img.width / 2) * scale;
@@ -66,8 +67,25 @@ export const processImage = (
     tCtx.rotate((settings.rotation * Math.PI) / 180);
     tCtx.translate(-(width/2 + offsetX), -(height/2 + offsetY)); // Rotate around shift point
     
-    tCtx.drawImage(img, baseX + offsetX, baseY + offsetY, img.width * scale, img.height * scale);
+    tCtx.drawImage(baseImg, baseX + offsetX, baseY + offsetY, baseImg.width * scale, baseImg.height * scale);
     tCtx.restore();
+
+    // 2b. Optional PATTERN image (second source) rendered into its own buffer
+    let patternData: Uint8ClampedArray | null = null;
+    if (patternImg && patternImg.complete) {
+        const pCanvas = document.createElement('canvas');
+        pCanvas.width = width;
+        pCanvas.height = height;
+        const pCtx = pCanvas.getContext('2d');
+        if (pCtx) {
+            const pScale = Math.max(width / patternImg.width, height / patternImg.height) * settings.zoom;
+            const pBaseX = (width / 2) - (patternImg.width / 2) * pScale;
+            const pBaseY = (height / 2) - (patternImg.height / 2) * pScale;
+            pCtx.drawImage(patternImg, pBaseX, pBaseY, patternImg.width * pScale, patternImg.height * pScale);
+            const pImageData = pCtx.getImageData(0, 0, width, height);
+            patternData = pImageData.data;
+        }
+    }
 
     // 3. Pixel Manipulation Loop
     const imageData = tCtx.getImageData(0, 0, width, height);
@@ -76,6 +94,8 @@ export const processImage = (
 
     const contrastFactor = (259 * (settings.contrast + 255)) / (255 * (259 - settings.contrast));
     const mix = settings.colorMix / 100;
+    const textureMix = settings.patternTextureMix / 100;
+    const detailMix = settings.patternDetailMix / 100;
     
     for (let i = 0; i < len; i += 4) {
         let r = data[i];
@@ -91,6 +111,18 @@ export const processImage = (
         r = Math.min(255, Math.max(0, r));
         g = Math.min(255, Math.max(0, g));
         b = Math.min(255, Math.max(0, b));
+
+        // Optional pattern-driven local structure (detail) BEFORE brand mapping
+        if (patternData && detailMix > 0) {
+            const sr = patternData[i];
+            const sg = patternData[i+1];
+            const sb = patternData[i+2];
+            const sLuma = 0.299 * sr + 0.587 * sg + 0.114 * sb;
+            const factor = 1 + ((sLuma - 128) / 128) * detailMix; // -detailMix..+detailMix
+            r *= factor;
+            g *= factor;
+            b *= factor;
+        }
 
         // Luma
         const luma = 0.299 * r + 0.587 * g + 0.114 * b;
@@ -135,6 +167,16 @@ export const processImage = (
             data[i] = r;
             data[i+1] = g;
             data[i+2] = b;
+        }
+
+        // Optional pattern texture blend AFTER brand mapping
+        if (patternData && textureMix > 0) {
+            const sr = patternData[i];
+            const sg = patternData[i+1];
+            const sb = patternData[i+2];
+            data[i]     = data[i]     * (1 - textureMix) + sr * textureMix;
+            data[i + 1] = data[i + 1] * (1 - textureMix) + sg * textureMix;
+            data[i + 2] = data[i + 2] * (1 - textureMix) + sb * textureMix;
         }
     }
     

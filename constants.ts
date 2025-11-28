@@ -11,6 +11,8 @@ export const DEFAULT_SETTINGS: GeneratorSettings = {
     scanlines: 0,
     colorMix: 100, // Fully brand colors by default
     limeAccent: 0,
+    patternTextureMix: 0,
+    patternDetailMix: 0,
     kaleidoscopeSegments: 4,
     mirrorMode: true,
     zoom: 1.0,

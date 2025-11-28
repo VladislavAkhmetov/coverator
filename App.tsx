@@ -10,11 +10,13 @@ const PLACEHOLDER_IMG_URL = "https://picsum.photos/1920/1080?grayscale&blur=2";
 export default function App() {
   const [settings, setSettings] = useState<GeneratorSettings>(DEFAULT_SETTINGS);
   const [imageSrc, setImageSrc] = useState<string>(PLACEHOLDER_IMG_URL);
+  const [patternSrc, setPatternSrc] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [showCamera, setShowCamera] = useState(false);
   
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imgRef = useRef<HTMLImageElement>(new Image());
+  const patternImgRef = useRef<HTMLImageElement | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
@@ -25,6 +27,17 @@ export default function App() {
     imgRef.current.onload = () => renderCanvas();
   }, [imageSrc]);
 
+  // Load pattern image (second source)
+  useEffect(() => {
+    if (!patternSrc) return;
+    if (!patternImgRef.current) {
+      patternImgRef.current = new Image();
+    }
+    patternImgRef.current.crossOrigin = "Anonymous";
+    patternImgRef.current.src = patternSrc;
+    patternImgRef.current.onload = () => renderCanvas();
+  }, [patternSrc]);
+
   // Re-render when settings change
   useEffect(() => {
     requestAnimationFrame(renderCanvas);
@@ -33,6 +46,7 @@ export default function App() {
   const renderCanvas = () => {
     const canvas = canvasRef.current;
     const img = imgRef.current;
+    const patternImg = patternImgRef.current;
     if (!canvas || !img.complete) return;
 
     // Set canvas size (High res)
@@ -46,16 +60,29 @@ export default function App() {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    processImage(ctx, img, settings, canvas.width, canvas.height);
+    processImage(ctx, img, patternImg ?? null, settings, canvas.width, canvas.height);
   };
 
-  const handleUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleUploadBase = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
       const reader = new FileReader();
       reader.onload = (event) => {
         if (typeof event.target?.result === 'string') {
           setImageSrc(event.target.result);
+        }
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleUploadPattern = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        if (typeof event.target?.result === 'string') {
+          setPatternSrc(event.target.result);
         }
       };
       reader.readAsDataURL(file);
@@ -183,7 +210,8 @@ export default function App() {
         <Controls 
             settings={settings}
             onUpdate={setSettings}
-            onUpload={handleUpload}
+            onUploadBase={handleUploadBase}
+            onUploadPattern={handleUploadPattern}
             onDownload={handleDownload}
             presets={PRESETS}
             onApplyPreset={(p) => setSettings(p.settings)}
