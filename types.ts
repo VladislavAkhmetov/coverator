@@ -27,8 +27,8 @@ export interface GeneratorSettings {
     shiftY: number; // -100 to 100 (Pan image vertically)
     
     // Branding
-    logoOverlay: 'none' | 'watermark' | 'mask-positive' | 'mask-negative';
-    logoScale: number; // 0.1 - 2.0
+    logoOverlay: 'none' | 'watermark' | 'mask-positive' | 'mask-negative' | 'lime-logo' | 'warp-logo';
+    logoScale: number; // 0.1 - 3.0
 }
 
 export interface Preset {

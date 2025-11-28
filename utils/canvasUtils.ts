@@ -337,18 +337,47 @@ export const processImage = (
             ctx.fillStyle = '#000';
             renderLogo();
         } else if (settings.logoOverlay === 'mask-negative') {
-            // Content everywhere EXCEPT Logo (Logo is transparent/black)
-            ctx.globalCompositeOperation = 'destination-out';
-            ctx.fillStyle = '#000';
-            renderLogo();
-            
-            // NO STROKE (Removed as per request)
-            
-        } else if (settings.logoOverlay === 'watermark') {
-            // White Overlay
+            // Solid black logo on top
             ctx.globalCompositeOperation = 'source-over';
-            ctx.fillStyle = 'rgba(255, 255, 255, 0.9)';
+            ctx.fillStyle = 'rgba(0, 0, 0, 0.95)';
             renderLogo();
+        } else if (settings.logoOverlay === 'watermark') {
+            // White Overlay (classic watermark)
+            ctx.globalCompositeOperation = 'source-over';
+            ctx.fillStyle = 'rgba(255, 255, 255, 0.95)';
+            renderLogo();
+        } else if (settings.logoOverlay === 'lime-logo') {
+            // Neon Lime logo with glow
+            ctx.globalCompositeOperation = 'source-over';
+            ctx.shadowColor = 'rgba(180,255,0,0.8)';
+            ctx.shadowBlur = 40;
+            ctx.fillStyle = 'rgba(180,255,0,1)';
+            renderLogo();
+        } else if (settings.logoOverlay === 'warp-logo') {
+            // Creative warped logo: multiple offset, rotated passes with different composite modes
+            const passes = 6;
+            for (let i = 0; i < passes; i++) {
+                const t = i / (passes - 1);
+                ctx.save();
+                ctx.globalCompositeOperation = i % 2 === 0 ? 'screen' : 'overlay';
+                ctx.translate(
+                    Math.sin(t * Math.PI * 2) * width * 0.02,
+                    Math.cos(t * Math.PI * 2) * height * 0.02
+                );
+                ctx.rotate((t - 0.5) * 0.35);
+                ctx.fillStyle = `rgba(${BLUE.r},${BLUE.g},${BLUE.b},${0.25 + 0.1 * i})`;
+                if (i === passes - 1) {
+                    // Last pass with lime edge
+                    ctx.strokeStyle = `rgba(${LIME.r},${LIME.g},${LIME.b},0.9)`;
+                    ctx.lineWidth = 2 * settings.logoScale;
+                } else {
+                    ctx.strokeStyle = 'transparent';
+                    ctx.lineWidth = 0;
+                }
+                // Draw filled logo
+                drawTsekhLogo(ctx, width, height, settings.logoScale * (0.8 + 0.15 * i));
+                ctx.restore();
+            }
         }
         ctx.restore();
     }

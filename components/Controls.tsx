@@ -15,7 +15,7 @@ interface ControlsProps {
     onTakePhoto: () => void;
 }
 
-const Slider = ({ label, value, min, max, onChange, unit = "" }: any) => (
+const Slider = ({ label, value, min, max, onChange, unit = "", step = 1 }: any) => (
     <div className="mb-4 group">
         <div className="flex justify-between text-[10px] text-gray-500 mb-1 font-mono uppercase tracking-widest">
             <span className="group-hover:text-white transition-colors flex items-center gap-1">
@@ -30,6 +30,7 @@ const Slider = ({ label, value, min, max, onChange, unit = "" }: any) => (
                 min={min} 
                 max={max} 
                 value={value} 
+                step={step}
                 onChange={(e) => onChange(Number(e.target.value))}
                 className="w-full z-10 opacity-0 absolute cursor-pointer h-full"
             />
@@ -222,12 +223,14 @@ export const Controls: React.FC<ControlsProps> = ({
             </Section>
 
             <Section title="Branding Layer" icon={Layers}>
-                <div className="grid grid-cols-2 gap-2 mb-6">
+                <div className="grid grid-cols-3 gap-2 mb-6">
                      {[
                          {id: 'none', label: 'Hidden'},
-                         {id: 'watermark', label: 'Overlay'},
+                         {id: 'watermark', label: 'White logo'},
                          {id: 'mask-positive', label: 'Fill Logo'},
-                         {id: 'mask-negative', label: 'Fill BG'},
+                         {id: 'mask-negative', label: 'Black logo'},
+                         {id: 'lime-logo', label: 'Lime logo'},
+                         {id: 'warp-logo', label: 'Warped logo'},
                      ].map(mode => (
                          <button
                             key={mode.id}
@@ -239,7 +242,7 @@ export const Controls: React.FC<ControlsProps> = ({
                          </button>
                      ))}
                 </div>
-                 <Slider label="Logo Scale" value={settings.logoScale} min={0.1} max={2.0} onChange={(v: number) => update('logoScale', v)} />
+                 <Slider label="Logo Scale" value={settings.logoScale} min={0.2} max={3.0} step={0.1} onChange={(v: number) => update('logoScale', v)} />
             </Section>
 
             <button 
