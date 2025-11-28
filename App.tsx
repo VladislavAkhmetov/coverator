@@ -66,7 +66,7 @@ export default function App() {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const link = document.createElement('a');
-    link.download = `levo-coverator-${Date.now()}.png`;
+    link.download = `tsekh_vlab_${Date.now()}.png`;
     link.href = canvas.toDataURL('image/png');
     link.click();
   };

@@ -103,7 +103,7 @@ export const Controls: React.FC<ControlsProps> = ({
                 <label className="flex flex-col items-center justify-center gap-2 bg-[#0F0F0F] hover:bg-[#151515] border border-gray-800 text-white py-6 px-4 cursor-pointer transition-all hover:border-[#3253EE] hover:shadow-[0_0_20px_rgba(50,83,238,0.1)] group relative overflow-hidden">
                     <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-[#3253EE]/10 to-transparent opacity-0 group-hover:opacity-100 transition-opacity"></div>
                     <Upload size={24} className="text-gray-500 group-hover:text-[#3253EE] transition-colors mb-1" />
-                    <span className="text-[10px] font-bold font-mono tracking-wider z-10">UPLOAD SOURCE</span>
+                    <span className="text-[10px] font-bold font-mono tracking-wider z-10 text-center">UPLOAD SOURCE</span>
                     <input type="file" onChange={onUpload} accept="image/*" className="hidden" />
                 </label>
                 <button 
