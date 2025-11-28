@@ -4,6 +4,7 @@ import { GeneratorSettings, Preset } from './types';
 import { DEFAULT_SETTINGS, PRESETS } from './constants';
 import { processImage } from './utils/canvasUtils';
 import { TYPEWRITER_PHRASES } from './constants/typewriterPhrases';
+import { removeBackgroundSimple } from './utils/backgroundRemoval';
 
 // Default Placeholder Image (Abstract Tech)
 const PLACEHOLDER_IMG_URL = "https://picsum.photos/1920/1080?grayscale&blur=2"; 
@@ -33,6 +34,7 @@ export default function App() {
   const streamRef = useRef<MediaStream | null>(null);
   const previewStreamRef = useRef<MediaStream | null>(null); // For camera preview overlay
   const previewVideoRef = useRef<HTMLVideoElement>(null);
+  const segmentationCanvasRef = useRef<HTMLCanvasElement | null>(null); // For background removal
 
   // Load initial image
   useEffect(() => {
@@ -85,11 +87,14 @@ export default function App() {
     };
   }, [settings.animationEnabled, settings]);
 
-  // Typewriter effect
+  // Typewriter effect - зацикленный: набор → стирание → снова набор
+  const [isTyping, setIsTyping] = useState(true); // true = typing, false = erasing
+  
   useEffect(() => {
     if (!settings.typewriterEnabled) {
       setTypewriterText('');
       setTypewriterCharIndex(0);
+      setIsTyping(true);
       if (typewriterTimerRef.current) {
         clearTimeout(typewriterTimerRef.current);
         typewriterTimerRef.current = null;
@@ -98,20 +103,37 @@ export default function App() {
     }
 
     const currentPhrase = TYPEWRITER_PHRASES[currentPhraseIndex] || '';
-    const speed = Math.max(50, 500 - (settings.typewriterSpeed * 4.5)); // 50-500ms per char
+    const speed = Math.max(30, 400 - (settings.typewriterSpeed * 3.7)); // 30-400ms per char
+    const eraseSpeed = speed * 0.5; // Стирание быстрее в 2 раза
 
-    if (typewriterCharIndex < currentPhrase.length) {
-      typewriterTimerRef.current = setTimeout(() => {
-        setTypewriterText(currentPhrase.substring(0, typewriterCharIndex + 1));
-        setTypewriterCharIndex(typewriterCharIndex + 1);
-      }, speed);
+    if (isTyping) {
+      // Набираем текст
+      if (typewriterCharIndex < currentPhrase.length) {
+        typewriterTimerRef.current = setTimeout(() => {
+          setTypewriterText(currentPhrase.substring(0, typewriterCharIndex + 1));
+          setTypewriterCharIndex(typewriterCharIndex + 1);
+        }, speed);
+      } else {
+        // Фраза набрана, ждём и начинаем стирать
+        typewriterTimerRef.current = setTimeout(() => {
+          setIsTyping(false);
+        }, 1500); // Пауза после набора
+      }
     } else {
-      // Phrase complete, wait then reset
-      typewriterTimerRef.current = setTimeout(() => {
-        setTypewriterText('');
-        setTypewriterCharIndex(0);
+      // Стираем текст
+      if (typewriterCharIndex > 0) {
+        typewriterTimerRef.current = setTimeout(() => {
+          setTypewriterText(currentPhrase.substring(0, typewriterCharIndex - 1));
+          setTypewriterCharIndex(typewriterCharIndex - 1);
+        }, eraseSpeed);
+      } else {
+        // Текст стёрт, переходим к следующей фразе и начинаем набирать
         setCurrentPhraseIndex((prev) => (prev + 1) % TYPEWRITER_PHRASES.length);
-      }, 2000);
+        setIsTyping(true);
+        typewriterTimerRef.current = setTimeout(() => {
+          // Небольшая пауза перед новой фразой
+        }, 300);
+      }
     }
 
     return () => {
@@ -119,7 +141,7 @@ export default function App() {
         clearTimeout(typewriterTimerRef.current);
       }
     };
-  }, [settings.typewriterEnabled, typewriterCharIndex, currentPhraseIndex, settings.typewriterSpeed]);
+  }, [settings.typewriterEnabled, typewriterCharIndex, currentPhraseIndex, settings.typewriterSpeed, isTyping]);
 
   // Camera preview overlay
   useEffect(() => {
@@ -187,49 +209,80 @@ export default function App() {
       shiftY: Math.cos(deltaTime / 2000) * (settings.animationIntensity / 2)
     } : null;
 
+    // Сначала рисуем сгенерированный фон
     processImage(ctx, img, patternImg ?? null, settings, canvas.width, canvas.height, animOffset, typewriterText);
 
-    // Draw camera preview overlay if enabled
+    // Затем рисуем человека с вырезанным фоном поверх (как виртуальный фон в Zoom)
     if (settings.cameraPreviewEnabled && previewVideoRef.current && previewVideoRef.current.readyState >= 2) {
-      ctx.save();
-      // Draw camera in bottom-right corner, smaller size
-      const previewSize = Math.min(canvas.width * 0.25, canvas.height * 0.25);
-      const previewX = canvas.width - previewSize - 20;
-      const previewY = canvas.height - previewSize - 20;
+      const video = previewVideoRef.current;
       
-      // Rounded rectangle mask (using arc for compatibility)
-      const radius = 8;
-      ctx.beginPath();
-      ctx.moveTo(previewX + radius, previewY);
-      ctx.lineTo(previewX + previewSize - radius, previewY);
-      ctx.quadraticCurveTo(previewX + previewSize, previewY, previewX + previewSize, previewY + radius);
-      ctx.lineTo(previewX + previewSize, previewY + previewSize - radius);
-      ctx.quadraticCurveTo(previewX + previewSize, previewY + previewSize, previewX + previewSize - radius, previewY + previewSize);
-      ctx.lineTo(previewX + radius, previewY + previewSize);
-      ctx.quadraticCurveTo(previewX, previewY + previewSize, previewX, previewY + previewSize - radius);
-      ctx.lineTo(previewX, previewY + radius);
-      ctx.quadraticCurveTo(previewX, previewY, previewX + radius, previewY);
-      ctx.closePath();
-      ctx.clip();
+      // Создаём временный canvas для сегментации, если его нет
+      if (!segmentationCanvasRef.current) {
+        segmentationCanvasRef.current = document.createElement('canvas');
+      }
+      const segCanvas = segmentationCanvasRef.current;
       
-      ctx.drawImage(previewVideoRef.current, previewX, previewY, previewSize, previewSize);
+      // Обрабатываем видео для вырезания фона
+      const processedImageData = removeBackgroundSimple(video, segCanvas);
       
-      // Border
-      ctx.restore();
-      ctx.strokeStyle = '#3253EE';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(previewX + radius, previewY);
-      ctx.lineTo(previewX + previewSize - radius, previewY);
-      ctx.quadraticCurveTo(previewX + previewSize, previewY, previewX + previewSize, previewY + radius);
-      ctx.lineTo(previewX + previewSize, previewY + previewSize - radius);
-      ctx.quadraticCurveTo(previewX + previewSize, previewY + previewSize, previewX + previewSize - radius, previewY + previewSize);
-      ctx.lineTo(previewX + radius, previewY + previewSize);
-      ctx.quadraticCurveTo(previewX, previewY + previewSize, previewX, previewY + previewSize - radius);
-      ctx.lineTo(previewX, previewY + radius);
-      ctx.quadraticCurveTo(previewX, previewY, previewX + radius, previewY);
-      ctx.closePath();
-      ctx.stroke();
+      if (processedImageData) {
+        // Создаём временный canvas для обработанного изображения
+        const tempCanvas = document.createElement('canvas');
+        tempCanvas.width = processedImageData.width;
+        tempCanvas.height = processedImageData.height;
+        const tempCtx = tempCanvas.getContext('2d');
+        
+        if (tempCtx) {
+          tempCtx.putImageData(processedImageData, 0, 0);
+          
+          // Масштабируем видео под размер основного canvas (сохраняя пропорции)
+          const videoAspect = video.videoWidth / video.videoHeight;
+          const canvasAspect = canvas.width / canvas.height;
+          
+          let drawWidth = canvas.width;
+          let drawHeight = canvas.height;
+          let drawX = 0;
+          let drawY = 0;
+          
+          if (videoAspect > canvasAspect) {
+            // Видео шире - подгоняем по высоте
+            drawHeight = canvas.height;
+            drawWidth = drawHeight * videoAspect;
+            drawX = (canvas.width - drawWidth) / 2;
+          } else {
+            // Видео выше - подгоняем по ширине
+            drawWidth = canvas.width;
+            drawHeight = drawWidth / videoAspect;
+            drawY = (canvas.height - drawHeight) / 2;
+          }
+          
+          // Рисуем человека поверх фона
+          ctx.drawImage(tempCanvas, drawX, drawY, drawWidth, drawHeight);
+        }
+      } else {
+        // Fallback: если сегментация не сработала, рисуем видео с прозрачностью
+        ctx.globalAlpha = 0.9;
+        const videoAspect = video.videoWidth / video.videoHeight;
+        const canvasAspect = canvas.width / canvas.height;
+        
+        let drawWidth = canvas.width;
+        let drawHeight = canvas.height;
+        let drawX = 0;
+        let drawY = 0;
+        
+        if (videoAspect > canvasAspect) {
+          drawHeight = canvas.height;
+          drawWidth = drawHeight * videoAspect;
+          drawX = (canvas.width - drawWidth) / 2;
+        } else {
+          drawWidth = canvas.width;
+          drawHeight = drawWidth / videoAspect;
+          drawY = (canvas.height - drawHeight) / 2;
+        }
+        
+        ctx.drawImage(video, drawX, drawY, drawWidth, drawHeight);
+        ctx.globalAlpha = 1.0;
+      }
     }
   };
 
