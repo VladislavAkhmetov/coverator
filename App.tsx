@@ -4,7 +4,8 @@ import { GeneratorSettings, Preset } from './types';
 import { DEFAULT_SETTINGS, PRESETS } from './constants';
 import { processImage } from './utils/canvasUtils';
 import { TYPEWRITER_PHRASES } from './constants/typewriterPhrases';
-import { removeBackgroundSimple } from './utils/backgroundRemoval';
+import * as bodyPix from '@tensorflow-models/body-pix';
+import '@tensorflow/tfjs';
 
 // Default Placeholder Image (Abstract Tech)
 const PLACEHOLDER_IMG_URL = "https://picsum.photos/1920/1080?grayscale&blur=2"; 
@@ -35,12 +36,16 @@ export default function App() {
   const previewStreamRef = useRef<MediaStream | null>(null); // For camera preview overlay
   const previewVideoRef = useRef<HTMLVideoElement>(null);
   const segmentationCanvasRef = useRef<HTMLCanvasElement | null>(null); // For background removal
+  const bodyPixModelRef = useRef<bodyPix.BodyPix | null>(null);
+  const cameraAnimationFrameRef = useRef<number>(0);
 
   // Load initial image
   useEffect(() => {
     imgRef.current.crossOrigin = "Anonymous";
     imgRef.current.src = imageSrc;
-    imgRef.current.onload = () => renderCanvas();
+    imgRef.current.onload = () => {
+      renderCanvas(0, !settings.cameraPreviewEnabled).catch(console.error);
+    };
   }, [imageSrc]);
 
   // Load pattern image (second source)
@@ -51,10 +56,30 @@ export default function App() {
     }
     patternImgRef.current.crossOrigin = "Anonymous";
     patternImgRef.current.src = patternSrc;
-    patternImgRef.current.onload = () => renderCanvas();
+    patternImgRef.current.onload = () => {
+      renderCanvas(0, !settings.cameraPreviewEnabled).catch(console.error);
+    };
   }, [patternSrc]);
 
-  // Animation loop
+  // Initialize BodyPix model
+  useEffect(() => {
+    const initBodyPix = async () => {
+      try {
+        const model = await bodyPix.load({
+          architecture: 'MobileNetV1',
+          outputStride: 16,
+          multiplier: 0.75,
+          quantBytes: 2
+        });
+        bodyPixModelRef.current = model;
+      } catch (error) {
+        console.error('Ошибка загрузки BodyPix:', error);
+      }
+    };
+    initBodyPix();
+  }, []);
+
+  // Animation loop (только для анимации фона)
   useEffect(() => {
     if (!settings.animationEnabled) {
       animationTimeRef.current = 0;
@@ -62,7 +87,10 @@ export default function App() {
         cancelAnimationFrame(animationFrameRef.current);
         animationFrameRef.current = 0;
       }
-      renderCanvas();
+      // Рендерим без анимации, но только если камера не включена (иначе камера сама рендерит)
+      if (!settings.cameraPreviewEnabled) {
+        renderCanvas(0, false).catch(console.error); // false = не рендерить камеру в этом цикле
+      }
       return;
     }
 
@@ -74,7 +102,7 @@ export default function App() {
       const deltaTime = timestamp - lastTime;
       lastTime = timestamp;
       
-      renderCanvas(timestamp); // Pass timestamp for animation calculation
+      renderCanvas(timestamp, false).catch(console.error); // false = не рендерить камеру в цикле анимации
       animationFrameRef.current = requestAnimationFrame(animate);
     };
 
@@ -86,6 +114,30 @@ export default function App() {
       }
     };
   }, [settings.animationEnabled, settings]);
+
+  // Отдельный цикл для камеры (независимо от анимации)
+  useEffect(() => {
+    if (!settings.cameraPreviewEnabled || !previewVideoRef.current || previewVideoRef.current.readyState < 2) {
+      if (cameraAnimationFrameRef.current) {
+        cancelAnimationFrame(cameraAnimationFrameRef.current);
+        cameraAnimationFrameRef.current = 0;
+      }
+      return;
+    }
+
+    const animateCamera = () => {
+      renderCanvas(animationTimeRef.current || 0, true).catch(console.error); // true = рендерить камеру
+      cameraAnimationFrameRef.current = requestAnimationFrame(animateCamera);
+    };
+
+    cameraAnimationFrameRef.current = requestAnimationFrame(animateCamera);
+
+    return () => {
+      if (cameraAnimationFrameRef.current) {
+        cancelAnimationFrame(cameraAnimationFrameRef.current);
+      }
+    };
+  }, [settings.cameraPreviewEnabled, settings]);
 
   // Typewriter effect - зацикленный: набор → стирание → снова набор
   const [isTyping, setIsTyping] = useState(true); // true = typing, false = erasing
@@ -185,7 +237,7 @@ export default function App() {
     };
   }, [settings.cameraPreviewEnabled]);
 
-  const renderCanvas = (deltaTime: number = 0) => {
+  const renderCanvas = async (deltaTime: number = 0, renderCamera: boolean = true) => {
     const canvas = canvasRef.current;
     const img = imgRef.current;
     const patternImg = patternImgRef.current;
@@ -212,76 +264,69 @@ export default function App() {
     // Сначала рисуем сгенерированный фон
     processImage(ctx, img, patternImg ?? null, settings, canvas.width, canvas.height, animOffset, typewriterText);
 
-    // Затем рисуем человека с вырезанным фоном поверх (как виртуальный фон в Zoom)
-    if (settings.cameraPreviewEnabled && previewVideoRef.current && previewVideoRef.current.readyState >= 2) {
+    // Затем рисуем человека с вырезанным фоном поверх (только если renderCamera = true)
+    if (renderCamera && settings.cameraPreviewEnabled && previewVideoRef.current && previewVideoRef.current.readyState >= 2) {
       const video = previewVideoRef.current;
       
-      // Создаём временный canvas для сегментации, если его нет
-      if (!segmentationCanvasRef.current) {
-        segmentationCanvasRef.current = document.createElement('canvas');
-      }
-      const segCanvas = segmentationCanvasRef.current;
-      
-      // Обрабатываем видео для вырезания фона
-      const processedImageData = removeBackgroundSimple(video, segCanvas);
-      
-      if (processedImageData) {
-        // Создаём временный canvas для обработанного изображения
-        const tempCanvas = document.createElement('canvas');
-        tempCanvas.width = processedImageData.width;
-        tempCanvas.height = processedImageData.height;
-        const tempCtx = tempCanvas.getContext('2d');
-        
-        if (tempCtx) {
-          tempCtx.putImageData(processedImageData, 0, 0);
+      if (bodyPixModelRef.current) {
+        // Используем BodyPix для вырезания фона
+        try {
+          const segmentation = await bodyPixModelRef.current.segmentPerson(video, {
+            flipHorizontal: false,
+            internalResolution: 'medium',
+            segmentationThreshold: 0.7
+          });
           
-          // Масштабируем видео под размер основного canvas (сохраняя пропорции)
-          const videoAspect = video.videoWidth / video.videoHeight;
-          const canvasAspect = canvas.width / canvas.height;
+          // Создаём временный canvas для маски
+          const maskCanvas = document.createElement('canvas');
+          maskCanvas.width = video.videoWidth;
+          maskCanvas.height = video.videoHeight;
+          const maskCtx = maskCanvas.getContext('2d');
           
-          let drawWidth = canvas.width;
-          let drawHeight = canvas.height;
-          let drawX = 0;
-          let drawY = 0;
-          
-          if (videoAspect > canvasAspect) {
-            // Видео шире - подгоняем по высоте
-            drawHeight = canvas.height;
-            drawWidth = drawHeight * videoAspect;
-            drawX = (canvas.width - drawWidth) / 2;
-          } else {
-            // Видео выше - подгоняем по ширине
-            drawWidth = canvas.width;
-            drawHeight = drawWidth / videoAspect;
-            drawY = (canvas.height - drawHeight) / 2;
+          if (maskCtx) {
+            // Рисуем маску
+            const mask = bodyPix.toMask(segmentation);
+            maskCtx.putImageData(mask, 0, 0);
+            
+            // Создаём canvas с видео
+            const videoCanvas = document.createElement('canvas');
+            videoCanvas.width = video.videoWidth;
+            videoCanvas.height = video.videoHeight;
+            const videoCtx = videoCanvas.getContext('2d');
+            
+            if (videoCtx) {
+              videoCtx.drawImage(video, 0, 0);
+              
+              // Применяем маску
+              videoCtx.globalCompositeOperation = 'destination-in';
+              videoCtx.drawImage(maskCanvas, 0, 0);
+              
+              // Масштабируем под размер основного canvas
+              const videoAspect = video.videoWidth / video.videoHeight;
+              const canvasAspect = canvas.width / canvas.height;
+              
+              let drawWidth = canvas.width;
+              let drawHeight = canvas.height;
+              let drawX = 0;
+              let drawY = 0;
+              
+              if (videoAspect > canvasAspect) {
+                drawHeight = canvas.height;
+                drawWidth = drawHeight * videoAspect;
+                drawX = (canvas.width - drawWidth) / 2;
+              } else {
+                drawWidth = canvas.width;
+                drawHeight = drawWidth / videoAspect;
+                drawY = (canvas.height - drawHeight) / 2;
+              }
+              
+              // Рисуем человека поверх фона
+              ctx.drawImage(videoCanvas, drawX, drawY, drawWidth, drawHeight);
+            }
           }
-          
-          // Рисуем человека поверх фона
-          ctx.drawImage(tempCanvas, drawX, drawY, drawWidth, drawHeight);
+        } catch (error) {
+          console.error('Ошибка сегментации BodyPix:', error);
         }
-      } else {
-        // Fallback: если сегментация не сработала, рисуем видео с прозрачностью
-        ctx.globalAlpha = 0.9;
-        const videoAspect = video.videoWidth / video.videoHeight;
-        const canvasAspect = canvas.width / canvas.height;
-        
-        let drawWidth = canvas.width;
-        let drawHeight = canvas.height;
-        let drawX = 0;
-        let drawY = 0;
-        
-        if (videoAspect > canvasAspect) {
-          drawHeight = canvas.height;
-          drawWidth = drawHeight * videoAspect;
-          drawX = (canvas.width - drawWidth) / 2;
-        } else {
-          drawWidth = canvas.width;
-          drawHeight = drawWidth / videoAspect;
-          drawY = (canvas.height - drawHeight) / 2;
-        }
-        
-        ctx.drawImage(video, drawX, drawY, drawWidth, drawHeight);
-        ctx.globalAlpha = 1.0;
       }
     }
   };
@@ -328,32 +373,33 @@ export default function App() {
     setIsExportingAnimation(true);
     
     try {
-      // For GIF export, we'll use a simple approach with multiple frames
-      // Note: For production, consider using a library like gif.js or similar
-      const frames: string[] = [];
-      const frameCount = 60; // 2 seconds at 30fps
-      const duration = 2000; // 2 seconds
-      const frameDelay = duration / frameCount;
+      // Экспорт только фона (без камеры)
+      const duration = 12000; // 12 секунд
+      const fps = 30;
+      const frameCount = Math.floor(duration / 1000 * fps); // 360 кадров
       
-      // Capture frames
-      for (let i = 0; i < frameCount; i++) {
-        const time = i * frameDelay;
-        animationTimeRef.current = time;
-        renderCanvas(time);
-        await new Promise(resolve => setTimeout(resolve, frameDelay / 10)); // Small delay for rendering
-        frames.push(canvas.toDataURL('image/png'));
-      }
-      
-      // For now, export as WebM video (better browser support)
-      // Convert frames to video using MediaRecorder API
-      const stream = canvas.captureStream(30); // 30 fps
+      // Используем MediaRecorder для записи canvas stream
+      const stream = canvas.captureStream(fps);
       const mediaRecorder = new MediaRecorder(stream, {
-        mimeType: 'video/webm;codecs=vp9'
+        mimeType: 'video/webm;codecs=vp9',
+        videoBitsPerSecond: 2500000 // 2.5 Mbps для качества
       });
       
       const chunks: Blob[] = [];
       mediaRecorder.ondataavailable = (e) => {
         if (e.data.size > 0) chunks.push(e.data);
+      };
+      
+      // Запускаем анимацию для записи (без камеры)
+      let frameTime = 0;
+      const frameInterval = 1000 / fps; // ~33ms на кадр
+      
+      const recordFrame = async () => {
+        if (frameTime < duration) {
+          await renderCanvas(frameTime, false); // false = не рендерить камеру
+          frameTime += frameInterval;
+          setTimeout(recordFrame, frameInterval);
+        }
       };
       
       return new Promise<void>((resolve, reject) => {
@@ -374,14 +420,20 @@ export default function App() {
           reject(e);
         };
         
+        // Начинаем запись
         mediaRecorder.start();
+        
+        // Запускаем рендеринг кадров
+        recordFrame();
+        
+        // Останавливаем через duration
         setTimeout(() => {
           mediaRecorder.stop();
         }, duration);
       });
     } catch (error) {
       console.error('Ошибка экспорта анимации:', error);
-      alert('Не удалось экспортировать анимацию. Попробуйте другой формат.');
+      alert('Не удалось экспортировать анимацию. Убедитесь, что анимация включена.');
       setIsExportingAnimation(false);
     }
   };
