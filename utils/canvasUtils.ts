@@ -55,8 +55,8 @@ export const processImage = (
     const scale = Math.max(width / baseImg.width, height / baseImg.height) * settings.zoom;
     
     // Calculate centered position
-    const baseX = (width / 2) - (img.width / 2) * scale;
-    const baseY = (height / 2) - (img.height / 2) * scale;
+    const baseX = (width / 2) - (baseImg.width / 2) * scale;
+    const baseY = (height / 2) - (baseImg.height / 2) * scale;
     
     // Apply Shift (as percentage of canvas size)
     const offsetX = (settings.shiftX / 100) * width;
