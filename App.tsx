@@ -3,6 +3,7 @@ import { Controls } from './components/Controls';
 import { GeneratorSettings, Preset } from './types';
 import { DEFAULT_SETTINGS, PRESETS } from './constants';
 import { processImage } from './utils/canvasUtils';
+import { TYPEWRITER_PHRASES } from './constants/typewriterPhrases';
 
 // Default Placeholder Image (Abstract Tech)
 const PLACEHOLDER_IMG_URL = "https://picsum.photos/1920/1080?grayscale&blur=2"; 
@@ -13,12 +14,25 @@ export default function App() {
   const [patternSrc, setPatternSrc] = useState<string | null>(null);
   const [isProcessing, setIsProcessing] = useState(false);
   const [showCamera, setShowCamera] = useState(false);
+  const [isExportingAnimation, setIsExportingAnimation] = useState(false);
+  
+  // Animation state
+  const animationFrameRef = useRef<number>(0);
+  const animationTimeRef = useRef<number>(0);
+  
+  // Typewriter state
+  const [typewriterText, setTypewriterText] = useState<string>('');
+  const [typewriterCharIndex, setTypewriterCharIndex] = useState<number>(0);
+  const [currentPhraseIndex, setCurrentPhraseIndex] = useState<number>(0);
+  const typewriterTimerRef = useRef<NodeJS.Timeout | null>(null);
   
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const imgRef = useRef<HTMLImageElement>(new Image());
   const patternImgRef = useRef<HTMLImageElement | null>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const previewStreamRef = useRef<MediaStream | null>(null); // For camera preview overlay
+  const previewVideoRef = useRef<HTMLVideoElement>(null);
 
   // Load initial image
   useEffect(() => {
@@ -38,12 +52,118 @@ export default function App() {
     patternImgRef.current.onload = () => renderCanvas();
   }, [patternSrc]);
 
-  // Re-render when settings change
+  // Animation loop
   useEffect(() => {
-    requestAnimationFrame(renderCanvas);
-  }, [settings]);
+    if (!settings.animationEnabled) {
+      animationTimeRef.current = 0;
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+        animationFrameRef.current = 0;
+      }
+      renderCanvas();
+      return;
+    }
 
-  const renderCanvas = () => {
+    let lastTime = 0;
+    const animate = (timestamp: number) => {
+      if (lastTime === 0) {
+        lastTime = timestamp;
+      }
+      const deltaTime = timestamp - lastTime;
+      lastTime = timestamp;
+      
+      renderCanvas(timestamp); // Pass timestamp for animation calculation
+      animationFrameRef.current = requestAnimationFrame(animate);
+    };
+
+    animationFrameRef.current = requestAnimationFrame(animate);
+    
+    return () => {
+      if (animationFrameRef.current) {
+        cancelAnimationFrame(animationFrameRef.current);
+      }
+    };
+  }, [settings.animationEnabled, settings]);
+
+  // Typewriter effect
+  useEffect(() => {
+    if (!settings.typewriterEnabled) {
+      setTypewriterText('');
+      setTypewriterCharIndex(0);
+      if (typewriterTimerRef.current) {
+        clearTimeout(typewriterTimerRef.current);
+        typewriterTimerRef.current = null;
+      }
+      return;
+    }
+
+    const currentPhrase = TYPEWRITER_PHRASES[currentPhraseIndex] || '';
+    const speed = Math.max(50, 500 - (settings.typewriterSpeed * 4.5)); // 50-500ms per char
+
+    if (typewriterCharIndex < currentPhrase.length) {
+      typewriterTimerRef.current = setTimeout(() => {
+        setTypewriterText(currentPhrase.substring(0, typewriterCharIndex + 1));
+        setTypewriterCharIndex(typewriterCharIndex + 1);
+      }, speed);
+    } else {
+      // Phrase complete, wait then reset
+      typewriterTimerRef.current = setTimeout(() => {
+        setTypewriterText('');
+        setTypewriterCharIndex(0);
+        setCurrentPhraseIndex((prev) => (prev + 1) % TYPEWRITER_PHRASES.length);
+      }, 2000);
+    }
+
+    return () => {
+      if (typewriterTimerRef.current) {
+        clearTimeout(typewriterTimerRef.current);
+      }
+    };
+  }, [settings.typewriterEnabled, typewriterCharIndex, currentPhraseIndex, settings.typewriterSpeed]);
+
+  // Camera preview overlay
+  useEffect(() => {
+    if (!settings.cameraPreviewEnabled) {
+      if (previewStreamRef.current) {
+        previewStreamRef.current.getTracks().forEach(track => track.stop());
+        previewStreamRef.current = null;
+      }
+      return;
+    }
+
+    const initPreviewCamera = async () => {
+      try {
+        if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+          alert('Камера не поддерживается для предпросмотра');
+          setSettings(prev => ({ ...prev, cameraPreviewEnabled: false }));
+          return;
+        }
+
+        const stream = await navigator.mediaDevices.getUserMedia({ 
+          video: { facingMode: 'user' } // Front camera for preview
+        });
+        
+        previewStreamRef.current = stream;
+        if (previewVideoRef.current) {
+          previewVideoRef.current.srcObject = stream;
+          previewVideoRef.current.play();
+        }
+      } catch (error) {
+        console.error('Ошибка доступа к камере для предпросмотра:', error);
+        setSettings(prev => ({ ...prev, cameraPreviewEnabled: false }));
+      }
+    };
+
+    initPreviewCamera();
+
+    return () => {
+      if (previewStreamRef.current) {
+        previewStreamRef.current.getTracks().forEach(track => track.stop());
+      }
+    };
+  }, [settings.cameraPreviewEnabled]);
+
+  const renderCanvas = (deltaTime: number = 0) => {
     const canvas = canvasRef.current;
     const img = imgRef.current;
     const patternImg = patternImgRef.current;
@@ -53,14 +173,64 @@ export default function App() {
     const displayWidth = window.innerWidth > 1200 ? 1920 : 1080;
     const displayHeight = window.innerWidth > 1200 ? 1080 : 1080; 
     
-    // Maintain square if needed, or 16:9. Let's do 16:9 corporate wallpaper standard.
     canvas.width = displayWidth;
     canvas.height = displayHeight;
 
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    processImage(ctx, img, patternImg ?? null, settings, canvas.width, canvas.height);
+    // Calculate animation offset if enabled
+    const animOffset = settings.animationEnabled ? {
+      rotation: (deltaTime / 100) * (settings.animationSpeed / 10), // degrees per second
+      zoom: 1 + Math.sin(deltaTime / 1000) * (settings.animationIntensity / 200),
+      shiftX: Math.sin(deltaTime / 2000) * (settings.animationIntensity / 2),
+      shiftY: Math.cos(deltaTime / 2000) * (settings.animationIntensity / 2)
+    } : null;
+
+    processImage(ctx, img, patternImg ?? null, settings, canvas.width, canvas.height, animOffset, typewriterText);
+
+    // Draw camera preview overlay if enabled
+    if (settings.cameraPreviewEnabled && previewVideoRef.current && previewVideoRef.current.readyState >= 2) {
+      ctx.save();
+      // Draw camera in bottom-right corner, smaller size
+      const previewSize = Math.min(canvas.width * 0.25, canvas.height * 0.25);
+      const previewX = canvas.width - previewSize - 20;
+      const previewY = canvas.height - previewSize - 20;
+      
+      // Rounded rectangle mask (using arc for compatibility)
+      const radius = 8;
+      ctx.beginPath();
+      ctx.moveTo(previewX + radius, previewY);
+      ctx.lineTo(previewX + previewSize - radius, previewY);
+      ctx.quadraticCurveTo(previewX + previewSize, previewY, previewX + previewSize, previewY + radius);
+      ctx.lineTo(previewX + previewSize, previewY + previewSize - radius);
+      ctx.quadraticCurveTo(previewX + previewSize, previewY + previewSize, previewX + previewSize - radius, previewY + previewSize);
+      ctx.lineTo(previewX + radius, previewY + previewSize);
+      ctx.quadraticCurveTo(previewX, previewY + previewSize, previewX, previewY + previewSize - radius);
+      ctx.lineTo(previewX, previewY + radius);
+      ctx.quadraticCurveTo(previewX, previewY, previewX + radius, previewY);
+      ctx.closePath();
+      ctx.clip();
+      
+      ctx.drawImage(previewVideoRef.current, previewX, previewY, previewSize, previewSize);
+      
+      // Border
+      ctx.restore();
+      ctx.strokeStyle = '#3253EE';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(previewX + radius, previewY);
+      ctx.lineTo(previewX + previewSize - radius, previewY);
+      ctx.quadraticCurveTo(previewX + previewSize, previewY, previewX + previewSize, previewY + radius);
+      ctx.lineTo(previewX + previewSize, previewY + previewSize - radius);
+      ctx.quadraticCurveTo(previewX + previewSize, previewY + previewSize, previewX + previewSize - radius, previewY + previewSize);
+      ctx.lineTo(previewX + radius, previewY + previewSize);
+      ctx.quadraticCurveTo(previewX, previewY + previewSize, previewX, previewY + previewSize - radius);
+      ctx.lineTo(previewX, previewY + radius);
+      ctx.quadraticCurveTo(previewX, previewY, previewX + radius, previewY);
+      ctx.closePath();
+      ctx.stroke();
+    }
   };
 
   const handleUploadBase = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -96,6 +266,71 @@ export default function App() {
     link.download = `tsekh_vlab_${Date.now()}.png`;
     link.href = canvas.toDataURL('image/png');
     link.click();
+  };
+
+  const handleExportAnimation = async () => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    
+    setIsExportingAnimation(true);
+    
+    try {
+      // For GIF export, we'll use a simple approach with multiple frames
+      // Note: For production, consider using a library like gif.js or similar
+      const frames: string[] = [];
+      const frameCount = 60; // 2 seconds at 30fps
+      const duration = 2000; // 2 seconds
+      const frameDelay = duration / frameCount;
+      
+      // Capture frames
+      for (let i = 0; i < frameCount; i++) {
+        const time = i * frameDelay;
+        animationTimeRef.current = time;
+        renderCanvas(time);
+        await new Promise(resolve => setTimeout(resolve, frameDelay / 10)); // Small delay for rendering
+        frames.push(canvas.toDataURL('image/png'));
+      }
+      
+      // For now, export as WebM video (better browser support)
+      // Convert frames to video using MediaRecorder API
+      const stream = canvas.captureStream(30); // 30 fps
+      const mediaRecorder = new MediaRecorder(stream, {
+        mimeType: 'video/webm;codecs=vp9'
+      });
+      
+      const chunks: Blob[] = [];
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) chunks.push(e.data);
+      };
+      
+      return new Promise<void>((resolve, reject) => {
+        mediaRecorder.onstop = () => {
+          const blob = new Blob(chunks, { type: 'video/webm' });
+          const url = URL.createObjectURL(blob);
+          const link = document.createElement('a');
+          link.download = `tsekh_vlab_animation_${Date.now()}.webm`;
+          link.href = url;
+          link.click();
+          URL.revokeObjectURL(url);
+          setIsExportingAnimation(false);
+          resolve();
+        };
+        
+        mediaRecorder.onerror = (e) => {
+          setIsExportingAnimation(false);
+          reject(e);
+        };
+        
+        mediaRecorder.start();
+        setTimeout(() => {
+          mediaRecorder.stop();
+        }, duration);
+      });
+    } catch (error) {
+      console.error('Ошибка экспорта анимации:', error);
+      alert('Не удалось экспортировать анимацию. Попробуйте другой формат.');
+      setIsExportingAnimation(false);
+    }
   };
 
   const handleRandomize = () => {
@@ -213,6 +448,8 @@ export default function App() {
             onUploadBase={handleUploadBase}
             onUploadPattern={handleUploadPattern}
             onDownload={handleDownload}
+            onExportAnimation={handleExportAnimation}
+            isExportingAnimation={isExportingAnimation}
             presets={PRESETS}
             onApplyPreset={(p) => setSettings(p.settings)}
             onRandomize={handleRandomize}
@@ -251,6 +488,16 @@ export default function App() {
             <div className="text-gray-600 font-mono text-[10px]">1920x1080 OUTPUT</div>
         </div>
       </div>
+
+      {/* Hidden video for camera preview overlay */}
+      <video
+        ref={previewVideoRef}
+        autoPlay
+        playsInline
+        muted
+        className="hidden"
+        style={{ display: 'none' }}
+      />
 
       {/* Camera Modal */}
       {showCamera && (
